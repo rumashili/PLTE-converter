@@ -2,41 +2,49 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Misaki Font to Array</title>
+  <title>Misaki Font Full Converter</title>
   <style>
-    /* 同じ階層のTTFファイルを読み込む */
     @font-face {
       font-family: 'MisakiGothic';
       src: url('./misaki_gothic_2nd.ttf') format('truetype');
     }
-    body {
-      font-family: sans-serif;
-      padding: 20px;
-    }
-    /* プレビューを見やすくするために拡大＆ドットをくっきりさせる */
-    #preview {
-      width: 128px;
-      height: 128px;
-      border: 1px solid #ccc;
-      image-rendering: pixelated;
-      margin-top: 10px;
-      display: block;
-    }
+    body { font-family: sans-serif; margin: 20px; background: #f0f0f0; }
+    .controls { margin-bottom: 20px; }
+    .container { display: flex; gap: 10px; height: 70vh; }
+    .window { flex: 1; display: flex; flex-direction: column; }
+    .window label { font-weight: bold; margin-bottom: 5px; }
     textarea {
-      margin-top: 10px;
+      flex: 1;
       font-family: monospace;
+      font-size: 12px;
+      white-space: pre;
+      overflow-wrap: normal;
+      overflow-x: auto;
+      padding: 10px;
     }
+    #status { color: #666; margin-left: 10px; }
   </style>
 </head>
 <body>
-  <h1>美咲フォント ドット抽出</h1>
-  <input type="text" id="charInput" maxlength="1" value="あ">
-  <button id="convertBtn" disabled>フォント読み込み中...</button>
+  <h1>美咲フォント 全文字変換 (JIS第一/第二)</h1>
   
-  <canvas id="hiddenCanvas" width="8" height="8" style="display:none;"></canvas>
-  <canvas id="preview" width="8" height="8"></canvas>
-  
-  <textarea id="output" rows="5" cols="60" placeholder="ここに[0, 1, 0...]の配列が出力されるよ"></textarea>
+  <div class="controls">
+    <button id="startBtn" disabled>フォント読み込み中...</button>
+    <span id="status">準備ができたらボタンを押してね</span>
+  </div>
+
+  <div class="container">
+    <div class="window">
+      <label>ビット配列 (64文字)</label>
+      <textarea id="bitOutput" readonly></textarea>
+    </div>
+    <div class="window">
+      <label>対応する文字</label>
+      <textarea id="charOutput" readonly></textarea>
+    </div>
+  </div>
+
+  <canvas id="canvas" width="8" height="8" style="display:none;"></canvas>
 
   <script src="main.js"></script>
 </body>
