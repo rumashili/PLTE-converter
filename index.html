@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Misaki Font to Array</title>
+  <style>
+    /* 同じ階層のTTFファイルを読み込む */
+    @font-face {
+      font-family: 'MisakiGothic';
+      src: url('./misaki_gothic_2nd.ttf') format('truetype');
+    }
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    /* プレビューを見やすくするために拡大＆ドットをくっきりさせる */
+    #preview {
+      width: 128px;
+      height: 128px;
+      border: 1px solid #ccc;
+      image-rendering: pixelated;
+      margin-top: 10px;
+      display: block;
+    }
+    textarea {
+      margin-top: 10px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>美咲フォント ドット抽出</h1>
+  <input type="text" id="charInput" maxlength="1" value="あ">
+  <button id="convertBtn" disabled>フォント読み込み中...</button>
+  
+  <canvas id="hiddenCanvas" width="8" height="8" style="display:none;"></canvas>
+  <canvas id="preview" width="8" height="8"></canvas>
+  
+  <textarea id="output" rows="5" cols="60" placeholder="ここに[0, 1, 0...]の配列が出力されるよ"></textarea>
+
+  <script src="main.js"></script>
+</body>
+</html>
