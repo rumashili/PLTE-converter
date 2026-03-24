@@ -1,73 +1,108 @@
 document.addEventListener('DOMContentLoaded', async () => {
-  const charInput = document.getElementById('charInput');
-  const convertBtn = document.getElementById('convertBtn');
-  const hiddenCanvas = document.getElementById('hiddenCanvas');
-  const previewCanvas = document.getElementById('preview');
-  const output = document.getElementById('output');
+  const startBtn = document.getElementById('startBtn');
+  const bitOutput = document.getElementById('bitOutput');
+  const charOutput = document.getElementById('charOutput');
+  const status = document.getElementById('status');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-  // getContextの設定。getImageDataを多用するので willReadFrequently を true にしておく
-  const ctx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
-  const previewCtx = previewCanvas.getContext('2d');
-
-  // フォントのロードを待ってからボタンを有効化する
+  // フォントのロード待ち
   try {
-    const font = new FontFace('MisakiGothic', 'url(./misaki_gothic_2nd.ttf)');
+    const font = new FontFace('MisakiGothic', "url('./misaki_gothic_2nd.ttf')");
     await font.load();
     document.fonts.add(font);
-    convertBtn.textContent = '配列に変換';
-    convertBtn.disabled = false;
+    startBtn.textContent = '全変換を開始';
+    startBtn.disabled = false;
   } catch (err) {
-    alert('フォントの読み込みに失敗しちゃった。misaki_gothic_2nd.ttfが同じ階層にあるか確認してみてね！');
-    console.error(err);
+    status.textContent = 'フォントが見つかりません。';
     return;
   }
 
-  convertBtn.addEventListener('click', () => {
-    const char = charInput.value;
-    if (!char) return;
+  // JIS第一・第二水準の文字を生成する関数（簡易版）
+  function getJISCharacters() {
+    const chars = [];
+    // 区点コード: 1区〜94区
+    for (let q = 1; q <= 94; q++) {
+      // 1-15区: 記号・英数・かな
+      // 16-47区: 第一水準漢字
+      // 48-84区: 第二水準漢字
+      if (q >= 1 && q <= 84) {
+        for (let p = 1; p <= 94; p++) {
+          const char = jisToUnicode(q, p);
+          if (char) chars.push(char);
+        }
+      }
+    }
+    return chars;
+  }
 
-    // キャンバスを白で塗りつぶす（背景）
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, 8, 8);
+  // 区点コードをUnicode文字に変換
+  function jisToUnicode(q, p) {
+    try {
+      const buffer = new Uint8Array([q + 0xA0, p + 0xA0]);
+      const decoder = new TextDecoder('euc-jp');
+      const char = decoder.decode(buffer);
+      // 変換失敗時や制御文字を除外
+      if (char === '\uFFFD' || char.length === 0) return null;
+      return char;
+    } catch { return null; }
+  }
 
-    // フォントの描画設定
-    // 美咲フォントは8px指定でジャストサイズになる
+  startBtn.addEventListener('click', async () => {
+    startBtn.disabled = true;
+    bitOutput.value = '';
+    charOutput.value = '';
+    
+    const allChars = getJISCharacters();
+    const total = allChars.length;
+    
+    let bitResult = '';
+    let charResult = '';
+
+    // Canvasの基本設定
     ctx.font = '8px "MisakiGothic"';
     ctx.fillStyle = 'black';
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
 
-    // (0, 0)の位置に文字を描画
-    // ※ブラウザのレンダリングエンジンによっては1pxほど上下にズレる場合があるので、
-    // もしドットが切れる場合は fillText(char, 0, 1) のように微調整してみてね
-    ctx.fillText(char, 0, 0);
+    // 処理を分割して実行（フリーズ防止）
+    const batchSize = 100;
+    for (let i = 0; i < total; i++) {
+      const char = allChars[i];
 
-    // プレビュー用のキャンバスにもコピーして表示
-    previewCtx.drawImage(hiddenCanvas, 0, 0);
+      // Canvasをクリアして描画
+      ctx.clearRect(0, 0, 8, 8);
+      ctx.fillStyle = 'white'; // 背景
+      ctx.fillRect(0, 0, 8, 8);
+      ctx.fillStyle = 'black'; // 文字
+      ctx.fillText(char, 0, 0);
 
-    // 8x8のピクセルデータを取得
-    const imageData = ctx.getImageData(0, 0, 8, 8);
-    const data = imageData.data;
-    const binaryArray = [];
+      // ピクセルデータ取得
+      const imgData = ctx.getImageData(0, 0, 8, 8).data;
+      let bits = '';
+      for (let j = 0; j < imgData.length; j += 4) {
+        const brightness = (imgData[j] + imgData[j+1] + imgData[j+2]) / 3;
+        bits += (brightness < 128) ? '1' : '0';
+      }
 
-    // data配列は [R, G, B, A, R, G, B, A...] と1ピクセルにつき4要素入っている
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      
-      // RGBの平均値で明るさを出す (0が黒、255が白)
-      const brightness = (r + g + b) / 3;
-      
-      // アンチエイリアス対策としてしきい値（今回は128）で判定
-      if (brightness < 128) {
-        binaryArray.push(1); // 黒っぽいのでドットあり
-      } else {
-        binaryArray.push(0); // 白っぽいのでドットなし
+      bitResult += bits + '\n';
+      charResult += char + '\n';
+
+      // 一定数ごとに画面を更新
+      if (i % batchSize === 0) {
+        status.textContent = `変換中... ${i} / ${total}`;
+        bitOutput.value = bitResult;
+        charOutput.value = charResult;
+        // スクロールを一番下に
+        bitOutput.scrollTop = bitOutput.scrollHeight;
+        charOutput.scrollTop = charOutput.scrollHeight;
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
     }
 
-    // 結果を出力（カンマ区切りの文字列にして配列っぽく見せる）
-    output.value = `[${binaryArray.join(', ')}]`;
+    bitOutput.value = bitResult;
+    charOutput.value = charResult;
+    status.textContent = `完了！ 合計 ${total} 文字`;
+    startBtn.disabled = false;
   });
 });
