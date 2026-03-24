@@ -6,48 +6,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-  // フォントのロード待ち
+  // --- フォント読み込みセクション ---
+  status.textContent = 'フォントを読み込んでいます...';
+
   try {
-    const font = new FontFace('MisakiGothic', "url('./misaki_gothic_2nd.ttf')");
-    await font.load();
-    document.fonts.add(font);
+    // 1. FontFaceオブジェクトを作成
+    const fontName = 'MisakiGothic';
+    const font = new FontFace(fontName, "url('./misaki_gothic_2nd.ttf')");
+    
+    // 2. ドキュメントに追加
+    const loadedFont = await font.load();
+    document.fonts.add(loadedFont);
+    
+    // 3. ブラウザがそのフォントを使える状態になるまで待機
+    await document.fonts.ready;
+    
+    // 念のため、1x1のテスト描画をしてフォントを「アクティブ」にする
+    ctx.font = '8px "MisakiGothic"';
+    ctx.fillText(' ', 0, 0);
+
+    status.textContent = '準備完了！';
     startBtn.textContent = '全変換を開始';
     startBtn.disabled = false;
   } catch (err) {
-    status.textContent = 'フォントが見つかりません。';
+    console.error(err);
+    status.textContent = 'エラー：フォントファイルが見つからないか、読み込めませんでした。';
     return;
   }
 
-  // JIS第一・第二水準の文字を生成する関数（簡易版）
+  // --- JIS文字生成ロジック (変更なし) ---
   function getJISCharacters() {
     const chars = [];
-    // 区点コード: 1区〜94区
-    for (let q = 1; q <= 94; q++) {
-      // 1-15区: 記号・英数・かな
-      // 16-47区: 第一水準漢字
-      // 48-84区: 第二水準漢字
-      if (q >= 1 && q <= 84) {
-        for (let p = 1; p <= 94; p++) {
-          const char = jisToUnicode(q, p);
-          if (char) chars.push(char);
+    const decoder = new TextDecoder('euc-jp');
+    for (let q = 1; q <= 84; q++) { // 第1・第2水準
+      for (let p = 1; p <= 94; p++) {
+        const buffer = new Uint8Array([q + 0xA0, p + 0xA0]);
+        const char = decoder.decode(buffer);
+        if (char !== '\uFFFD' && char.length > 0) {
+          chars.push(char);
         }
       }
     }
     return chars;
   }
 
-  // 区点コードをUnicode文字に変換
-  function jisToUnicode(q, p) {
-    try {
-      const buffer = new Uint8Array([q + 0xA0, p + 0xA0]);
-      const decoder = new TextDecoder('euc-jp');
-      const char = decoder.decode(buffer);
-      // 変換失敗時や制御文字を除外
-      if (char === '\uFFFD' || char.length === 0) return null;
-      return char;
-    } catch { return null; }
-  }
-
+  // --- 変換実行セクション ---
   startBtn.addEventListener('click', async () => {
     startBtn.disabled = true;
     bitOutput.value = '';
@@ -56,28 +59,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     const allChars = getJISCharacters();
     const total = allChars.length;
     
-    let bitResult = '';
-    let charResult = '';
+    let bitBuffer = [];
+    let charBuffer = [];
 
-    // Canvasの基本設定
+    // 描画設定を再確認
     ctx.font = '8px "MisakiGothic"';
-    ctx.fillStyle = 'black';
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
 
-    // 処理を分割して実行（フリーズ防止）
-    const batchSize = 100;
     for (let i = 0; i < total; i++) {
       const char = allChars[i];
 
-      // Canvasをクリアして描画
-      ctx.clearRect(0, 0, 8, 8);
-      ctx.fillStyle = 'white'; // 背景
+      // キャンバスをリセットして描画
+      ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, 8, 8);
-      ctx.fillStyle = 'black'; // 文字
+      ctx.fillStyle = 'black';
       ctx.fillText(char, 0, 0);
 
-      // ピクセルデータ取得
+      // ピクセル抽出
       const imgData = ctx.getImageData(0, 0, 8, 8).data;
       let bits = '';
       for (let j = 0; j < imgData.length; j += 4) {
@@ -85,24 +84,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         bits += (brightness < 128) ? '1' : '0';
       }
 
-      bitResult += bits + '\n';
-      charResult += char + '\n';
+      bitBuffer.push(bits);
+      charBuffer.push(char);
 
-      // 一定数ごとに画面を更新
-      if (i % batchSize === 0) {
+      // 50文字ごとに画面更新（負荷軽減）
+      if (i % 50 === 0) {
         status.textContent = `変換中... ${i} / ${total}`;
-        bitOutput.value = bitResult;
-        charOutput.value = charResult;
-        // スクロールを一番下に
+        bitOutput.value = bitBuffer.join('\n') + '\n';
+        charOutput.value = charBuffer.join('\n') + '\n';
         bitOutput.scrollTop = bitOutput.scrollHeight;
         charOutput.scrollTop = charOutput.scrollHeight;
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(r => setTimeout(r, 0));
       }
     }
 
-    bitOutput.value = bitResult;
-    charOutput.value = charResult;
-    status.textContent = `完了！ 合計 ${total} 文字`;
+    bitOutput.value = bitBuffer.join('\n');
+    charOutput.value = charBuffer.join('\n');
+    status.textContent = `完了！ (${total}文字)`;
     startBtn.disabled = false;
   });
 });
