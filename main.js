@@ -16,12 +16,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.fonts.add(loadedFont);
     await document.fonts.ready;
     
-    // フォントをアクティブにするためのテスト描画
     ctx.font = '8px "MisakiGothic"';
     ctx.fillText(' ', 0, 0);
 
     status.textContent = '準備完了！';
-    startBtn.textContent = '全変換（矩形圧縮）を開始';
+    startBtn.textContent = '全変換（半角化＋矩形圧縮）を開始';
     startBtn.disabled = false;
   } catch (err) {
     console.error(err);
@@ -29,26 +28,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // --- 2. JIS第一・第二水準の文字生成 ---
+  // --- 2. JIS文字生成（全角→半角変換付き） ---
   function getJISCharacters() {
-    const chars = [];
+    const charsSet = new Set(); // 重複排除のためSetを使う
     const decoder = new TextDecoder('euc-jp');
-    // 区点コードの1区〜84区（一般的に使われる記号・第1・第2水準漢字）
+    
     for (let q = 1; q <= 84; q++) {
       for (let p = 1; p <= 94; p++) {
         const buffer = new Uint8Array([q + 0xA0, p + 0xA0]);
-        const char = decoder.decode(buffer);
+        let char = decoder.decode(buffer);
+        
         if (char !== '\uFFFD' && char.length > 0) {
-          chars.push(char);
+          // normalize('NFKC') で全角英数字・記号を半角に変換
+          // 例：「Ａ」→「A」、「１」→「1」、「！」→「!」
+          char = char.normalize('NFKC');
+          charsSet.add(char);
         }
       }
     }
-    return chars;
+    return Array.from(charsSet);
   }
 
   // --- 3. 矩形圧縮 (Greedy Mesh) ロジック ---
   function compressToRects(bitsArray) {
-    // 1次元配列を8x8の2次元グリッドに変換
     let grid = [];
     for (let y = 0; y < 8; y++) {
       grid[y] = bitsArray.slice(y * 8, y * 8 + 8);
@@ -59,7 +61,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     while (true) {
       let target = null;
-      // まだ「処理済み」になっていない黒いドット(1)を探す
       for (let y = 0; y < 8; y++) {
         for (let x = 0; x < 8; x++) {
           if (grid[y][x] === 1 && !processed[y][x]) {
@@ -70,18 +71,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (target) break;
       }
 
-      if (!target) break; // すべてのドットをカバーしたら終了
+      if (!target) break;
 
       let bestRect = { x: target.x, y: target.y, w: 1, h: 1, area: 1 };
 
-      // targetのドットを含む、すべての組み合わせの長方形を全探索して最大面積を探す
-      // (sx, sy) は左上、(ex, ey) は右下
       for (let sy = 0; sy <= target.y; sy++) {
         for (let sx = 0; sx <= target.x; sx++) {
           for (let ey = target.y; ey < 8; ey++) {
             for (let ex = target.x; ex < 8; ex++) {
-              
-              // 範囲内の grid[y][x] がすべて 1 かチェック
               let isSolid = true;
               for (let y = sy; y <= ey; y++) {
                 for (let x = sx; x <= ex; x++) {
@@ -96,9 +93,8 @@ document.addEventListener('DOMContentLoaded', async () => {
               if (isSolid) {
                 const w = ex - sx + 1;
                 const h = ey - sy + 1;
-                const area = w * h;
-                if (area > bestRect.area) {
-                  bestRect = { x: sx, y: sy, w, h, area };
+                if (w * h > bestRect.area) {
+                  bestRect = { x: sx, y: sy, w, h, area: w * h };
                 }
               }
             }
@@ -106,14 +102,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
-      // 見つかった最大長方形の範囲を「処理済み」にする
       for (let y = bestRect.y; y < bestRect.y + bestRect.h; y++) {
         for (let x = bestRect.x; x < bestRect.x + bestRect.w; x++) {
           processed[y][x] = true;
         }
       }
 
-      // x, y, w, h をそれぞれ1桁の文字として連結
       rectsResult += `${bestRect.x}${bestRect.y}${bestRect.w}${bestRect.h}`;
     }
 
@@ -139,13 +133,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     for (let i = 0; i < total; i++) {
       const char = allChars[i];
 
-      // Canvasに描画
       ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, 8, 8);
       ctx.fillStyle = 'black';
       ctx.fillText(char, 0, 0);
 
-      // ピクセルデータから0/1配列を作成
       const imgData = ctx.getImageData(0, 0, 8, 8).data;
       const bitsArray = [];
       for (let j = 0; j < imgData.length; j += 4) {
@@ -153,15 +145,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         bitsArray.push(brightness < 128 ? 1 : 0);
       }
 
-      // 矩形圧縮を実行
       const compressedString = compressToRects(bitsArray);
       
       bitBuffer.push(compressedString);
       charBuffer.push(char);
 
-      // 負荷軽減のための定期的な画面更新
-      if (i % 50 === 0) {
-        status.textContent = `圧縮中... ${i} / ${total}`;
+      if (i % 100 === 0) {
+        status.textContent = `処理中... ${i} / ${total}`;
         bitOutput.value = bitBuffer.join('\n') + '\n';
         charOutput.value = charBuffer.join('\n') + '\n';
         bitOutput.scrollTop = bitOutput.scrollHeight;
@@ -172,7 +162,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     bitOutput.value = bitBuffer.join('\n');
     charOutput.value = charBuffer.join('\n');
-    status.textContent = `完了！ (${total}文字)`;
+    status.textContent = `完了！ (${total}文字に最適化されました)`;
     startBtn.disabled = false;
   });
 });
