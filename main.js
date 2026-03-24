@@ -15,16 +15,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.fonts.add(loadedFont);
     await document.fonts.ready;
     ctx.font = '8px "MisakiGothic"';
-    ctx.fillText(' ', 0, 0);
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
     status.textContent = '準備完了！';
     startBtn.disabled = false;
   } catch (err) {
-    status.textContent = 'エラー：フォントファイルが見つかりません。';
+    status.textContent = 'エラー：フォントが見つかりません。';
     return;
   }
 
-  // --- 矩形圧縮 & [開始位置][幅] 計算ロジック ---
-  function getCharData(char, forceFullWidth = false) {
+  // --- 矩形圧縮 & 指定された幅タイプで文字列を生成する関数 ---
+  function generateData(char, isHalfWidthPair = false) {
+    // 常に「元の文字（全角）」を描画してドットデータを取得する
+    // ※半角ペアを作る場合でも、描画には元の全角文字を使うことで形を統一する
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, 8, 8);
     ctx.fillStyle = 'black';
@@ -32,9 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const imgData = ctx.getImageData(0, 0, 8, 8).data;
     let grid = [];
-    let minX = 8; 
-    let maxX = -1;
-    let hasPixel = false;
+    let minX = 8, maxX = -1, hasPixel = false;
 
     for (let y = 0; y < 8; y++) {
       grid[y] = [];
@@ -51,21 +52,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
-    let startX = 0;
-    let charW = 8;
-
-    if (forceFullWidth) {
+    // 幅データの決定
+    let startX = 0, charW = 8;
+    if (!isHalfWidthPair) {
       // 全角：0から始まり幅8
-      startX = 0;
-      charW = 8;
+      startX = 0; charW = 8;
     } else {
-      // 半角（可変）：ドットがある最小Xから、(最大X - 最小X + 1)の幅
+      // 半角ペア：ドットに合わせて可変
       startX = hasPixel ? minX : 0;
       charW = hasPixel ? (maxX - minX + 1) : 0;
     }
-
-    // [開始位置1文字][幅1文字] の計2文字
-    const widthData = `${startX}${charW}`; 
+    const widthHeader = `${startX}${charW}`;
 
     // 矩形圧縮 (Greedy Mesh)
     const processed = Array.from({ length: 8 }, () => Array(8).fill(false));
@@ -74,9 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       let target = null;
       for (let y = 0; y < 8; y++) {
         for (let x = 0; x < 8; x++) {
-          if (grid[y][x] === 1 && !processed[y][x]) {
-            target = { x, y }; break;
-          }
+          if (grid[y][x] === 1 && !processed[y][x]) { target = { x, y }; break; }
         }
         if (target) break;
       }
@@ -105,18 +100,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       rects += `${bR.x}${bR.y}${bR.w}${bR.h}`;
     }
-    return widthData + rects;
+    return widthHeader + rects;
   }
 
   startBtn.addEventListener('click', async () => {
     startBtn.disabled = true;
-    const bitBuffer = [];
-    const charBuffer = [];
+    const bitBuffer = [], charBuffer = [];
     const processedChars = new Set();
     const decoder = new TextDecoder('euc-jp');
-
-    ctx.font = '8px "MisakiGothic"';
-    ctx.textBaseline = 'top';
 
     for (let q = 1; q <= 84; q++) {
       for (let p = 1; p <= 94; p++) {
@@ -124,20 +115,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         const fullChar = decoder.decode(buf);
         if (fullChar === '\uFFFD' || fullChar.length === 0 || processedChars.has(fullChar)) continue;
 
-        // 全角版
-        bitBuffer.push(getCharData(fullChar, true));
+        // --- 1. 全角データの作成 ---
+        const rectDataStr = generateData(fullChar, false); // 幅 08 固定
+        bitBuffer.push(rectDataStr);
         charBuffer.push(fullChar);
         processedChars.add(fullChar);
 
-        // 半角ペア版
+        // --- 2. 半角ペアの作成（もし可能なら） ---
         const halfChar = fullChar.normalize('NFKC');
         if (halfChar !== fullChar && !processedChars.has(halfChar)) {
-          bitBuffer.push(getCharData(halfChar, false));
+          // 幅だけ可変(true)にするが、描画自体は fullChar を使っているので形は同じになる
+          // 内部で再計算される rects は fullChar 由来なので同一データになるはず
+          const halfRectDataStr = generateData(fullChar, true); 
+          bitBuffer.push(halfRectDataStr);
           charBuffer.push(halfChar);
           processedChars.add(halfChar);
         }
       }
-      
       if (q % 5 === 0) {
         status.textContent = `変換中... ${q}/84区`;
         bitOutput.value = bitBuffer.join('\n');
@@ -145,10 +139,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await new Promise(r => setTimeout(r, 0));
       }
     }
-
     bitOutput.value = bitBuffer.join('\n');
     charOutput.value = charBuffer.join('\n');
-    status.textContent = `完了！ ${charBuffer.length} 文字作成`;
+    status.textContent = `完了！ ${charBuffer.length} 文字`;
     startBtn.disabled = false;
   });
 });
