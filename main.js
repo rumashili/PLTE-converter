@@ -20,49 +20,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     status.textContent = '準備完了！';
     startBtn.disabled = false;
   } catch (err) {
-    status.textContent = 'エラー：フォントが見つかりません。';
+    status.textContent = 'エラー：フォントファイルが見つかりません。';
     return;
   }
 
-  // --- 矩形圧縮 & 指定された幅タイプで文字列を生成する関数 ---
-  function generateData(char, isHalfWidthPair = false) {
-    // 常に「元の文字（全角）」を描画してドットデータを取得する
-    // ※半角ペアを作る場合でも、描画には元の全角文字を使うことで形を統一する
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, 8, 8);
-    ctx.fillStyle = 'black';
-    ctx.fillText(char, 0, 0);
+  // --- ドットデータから矩形データと幅データを生成する関数 ---
+  function createDataString(grid, hasPixel, minX, maxX, isHalfWidth) {
+    let startX = 0;
+    let charW = 8;
 
-    const imgData = ctx.getImageData(0, 0, 8, 8).data;
-    let grid = [];
-    let minX = 8, maxX = -1, hasPixel = false;
-
-    for (let y = 0; y < 8; y++) {
-      grid[y] = [];
-      for (let x = 0; x < 8; x++) {
-        const idx = (y * 8 + x) * 4;
-        const brightness = (imgData[idx] + imgData[idx+1] + imgData[idx+2]) / 3;
-        const bit = brightness < 128 ? 1 : 0;
-        grid[y][x] = bit;
-        if (bit === 1) {
-          hasPixel = true;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-        }
-      }
-    }
-
-    // 幅データの決定
-    let startX = 0, charW = 8;
-    if (!isHalfWidthPair) {
-      // 全角：0から始まり幅8
+    if (!isHalfWidth) {
       startX = 0; charW = 8;
     } else {
-      // 半角ペア：ドットに合わせて可変
       startX = hasPixel ? minX : 0;
       charW = hasPixel ? (maxX - minX + 1) : 0;
     }
-    const widthHeader = `${startX}${charW}`;
+    const header = `${startX}${charW}`;
 
     // 矩形圧縮 (Greedy Mesh)
     const processed = Array.from({ length: 8 }, () => Array(8).fill(false));
@@ -100,7 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       rects += `${bR.x}${bR.y}${bR.w}${bR.h}`;
     }
-    return widthHeader + rects;
+    return header + rects;
   }
 
   startBtn.addEventListener('click', async () => {
@@ -115,25 +88,47 @@ document.addEventListener('DOMContentLoaded', async () => {
         const fullChar = decoder.decode(buf);
         if (fullChar === '\uFFFD' || fullChar.length === 0 || processedChars.has(fullChar)) continue;
 
-        // --- 1. 全角データの作成 ---
-        const rectDataStr = generateData(fullChar, false); // 幅 08 固定
-        bitBuffer.push(rectDataStr);
+        // --- 1. 全角文字で描画してグリッドデータを1回だけ作成 ---
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, 8, 8);
+        ctx.fillStyle = 'black';
+        ctx.fillText(fullChar, 0, 0);
+
+        const imgData = ctx.getImageData(0, 0, 8, 8).data;
+        let grid = [];
+        let minX = 8, maxX = -1, hasPixel = false;
+
+        for (let y = 0; y < 8; y++) {
+          grid[y] = [];
+          for (let x = 0; x < 8; x++) {
+            const idx = (y * 8 + x) * 4;
+            const brightness = (imgData[idx] + imgData[idx+1] + imgData[idx+2]) / 3;
+            const bit = brightness < 128 ? 1 : 0;
+            grid[y][x] = bit;
+            if (bit === 1) {
+              hasPixel = true;
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+            }
+          }
+        }
+
+        // --- 2. 全角用データ（幅08固定）を追加 ---
+        bitBuffer.push(createDataString(grid, hasPixel, minX, maxX, false));
         charBuffer.push(fullChar);
         processedChars.add(fullChar);
 
-        // --- 2. 半角ペアの作成（もし可能なら） ---
+        // --- 3. 半角ペアがあるなら、同じグリッドデータを使って追加 ---
         const halfChar = fullChar.normalize('NFKC');
         if (halfChar !== fullChar && !processedChars.has(halfChar)) {
-          // 幅だけ可変(true)にするが、描画自体は fullChar を使っているので形は同じになる
-          // 内部で再計算される rects は fullChar 由来なので同一データになるはず
-          const halfRectDataStr = generateData(fullChar, true); 
-          bitBuffer.push(halfRectDataStr);
+          // 同じ grid を渡すので、矩形データ部分は絶対に一致する！
+          bitBuffer.push(createDataString(grid, hasPixel, minX, maxX, true));
           charBuffer.push(halfChar);
           processedChars.add(halfChar);
         }
       }
       if (q % 5 === 0) {
-        status.textContent = `変換中... ${q}/84区`;
+        status.textContent = `同期中... ${q}/84区`;
         bitOutput.value = bitBuffer.join('\n');
         charOutput.value = charBuffer.join('\n');
         await new Promise(r => setTimeout(r, 0));
@@ -141,7 +136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     bitOutput.value = bitBuffer.join('\n');
     charOutput.value = charBuffer.join('\n');
-    status.textContent = `完了！ ${charBuffer.length} 文字`;
+    status.textContent = `完了！ ${charBuffer.length} 文字の完全同期データを作成しました。`;
     startBtn.disabled = false;
   });
 });
